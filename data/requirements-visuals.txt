@@ -1,0 +1,5 @@
+# Python packages for data/plot_timing_figures.py and data/plot_heatmaps_gif.py
+# Install: python -m pip install -r requirements-visuals.txt
+numpy>=1.20
+matplotlib>=3.5
+pillow>=9.0
