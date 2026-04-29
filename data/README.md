@@ -163,7 +163,7 @@ Minimum useful figure set the assignment calls out; combine **five** implementat
 
 | Script | Input | Output |
 |--------|--------|--------|
-| `plot_timing_figures.py` | `timing_summary.csv` (default: same directory; override with `--csv`) | `fig1_time_vs_problem_size.png`, `fig2_stacked_bars_all.png`, `fig3_speedup.png`, `fig3_speedup_faceted_by_n.png`, `fig4_efficiency.png` |
+| `plot_timing_figures.py` | `timing_summary.csv` (default: same directory; override with `--csv`) | `fig1/fig2` in `visuals/stacked` and/or `visuals/unstacked`; `fig3/fig4` in `visuals/` |
 | `plot_heatmaps_gif.py` | Optional: `--data-root` pointing to `results_full`; reads `input_5000.txt` and by default `serial/n5000_p1_t100.zip` | `fig5_heatmap_final.png`, `fig5_heatmap_evolution.gif` (2+ frames) |
 
 **Install (once):** from this directory, `python -m pip install -r requirements-visuals.txt`  
@@ -172,6 +172,34 @@ Minimum useful figure set the assignment calls out; combine **five** implementat
 ```bash
 python plot_timing_figures.py
 python plot_heatmaps_gif.py
+```
+
+### `plot_timing_figures.py` layout modes (fig1/fig2)
+
+The timing script now supports **both** prior styles for `fig1` and `fig2`:
+
+- **Stacked layout** (legacy combined style):
+  - `fig1`: one multi-panel figure across selected `p` values
+  - `fig2`: one figure per `n` with multiple `p` panels
+  - Output folder: `data/visuals/stacked/`
+- **Unstacked layout** (separate files by `p`):
+  - `fig1`: one file per `p` (`fig1_time_vs_problem_size_p*.png`)
+  - `fig2`: one file per `(n, p)` (`fig2_stacked_bars_n*_p*.png`)
+  - Output folder: `data/visuals/unstacked/`
+
+`fig3_speedup_n*.png` and `fig4_efficiency_n*.png` are still written to `data/visuals/`.
+
+Use:
+
+```bash
+# default: generate both stacked and unstacked fig1/fig2
+python plot_timing_figures.py
+
+# only stacked fig1/fig2
+python plot_timing_figures.py --fig12-layout stacked
+
+# only unstacked fig1/fig2
+python plot_timing_figures.py --fig12-layout unstacked
 ```
 
 If your `results_full` folder is not next to the outer `StencilHeatRun-main` folder, pass e.g.  
