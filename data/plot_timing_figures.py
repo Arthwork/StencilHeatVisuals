@@ -3,8 +3,8 @@
 Load timing_summary.csv and build clear, presentation-ready figures.
 
 Design goals (one main idea per output file, large subplots, no log scale):
-  • Time vs n          → few representative p values, separate PNGs or 2-panel max
-  • Stacked comp/other → one PNG per problem size n (wide single row)
+  • Time vs n          → stacked multi-panel or unstacked per-p PNGs
+  • Stacked comp/other → stacked one-PNG-per-n or unstacked one-PNG-per-(n,p)
   • Speedup            → one PNG per n (zoomed y-axis so separation is visible)
   • Efficiency         → one PNG per n (ideal efficiency = 1 shown as faint line only)
 
@@ -162,8 +162,14 @@ def main() -> int:
         "--time-p-values",
         type=int,
         nargs="*",
-        default=[1, 16],
-        help="Which p panels to plot for time-vs-n (default: 1 and 16 only; reduces clutter)",
+        default=None,
+        help="Optional override list of p values for fig1/fig2; default uses all available p values.",
+    )
+    ap.add_argument(
+        "--fig12-layout",
+        choices=["stacked", "unstacked", "both"],
+        default="both",
+        help="Generate fig1/fig2 in stacked folder, unstacked folder, or both.",
     )
     ap.add_argument(
         "--ideal-reference",
@@ -173,6 +179,10 @@ def main() -> int:
     args = ap.parse_args()
     out_dir = args.out
     out_dir.mkdir(parents=True, exist_ok=True)
+    out_stacked = out_dir / "stacked"
+    out_unstacked = out_dir / "unstacked"
+    out_stacked.mkdir(parents=True, exist_ok=True)
+    out_unstacked.mkdir(parents=True, exist_ok=True)
 
     rows = read_timing_csv(args.csv)
     if not rows:
@@ -183,74 +193,114 @@ def main() -> int:
     ns = sorted({r["n"] for r in rows})
     ps = sorted({r["p"] for r in rows})
     p_vals_all = [x for x in (1, 2, 4, 8, 16) if x in ps]
-    time_panels = [p for p in args.time_p_values if p in ps]
-    if not time_panels:
-        time_panels = p_vals_all[:2] if len(p_vals_all) >= 2 else p_vals_all
+    p_vals_plot = [p for p in (args.time_p_values or p_vals_all) if p in ps]
+    if not p_vals_plot:
+        p_vals_plot = p_vals_all
 
-    # ---- Fig 1: Time vs n — at most 2 panels side by side (large) ----
-    n_tp = len(time_panels)
-    fig1, axes1 = plt.subplots(
-        1,
-        n_tp,
-        figsize=(6.5 * n_tp, 5.5),
-        squeeze=False,
-        sharey=False,
-    )
-    for idx, pval in enumerate(time_panels):
-        ax = axes1[0][idx]
-        plot_time_vs_n_panel(ax, grid, impls_present, ns, pval, annotate=args.annotate)
-        ax.legend(loc="best", fontsize=10, framealpha=0.9)
-    fig1.suptitle("Total time vs problem size", fontsize=13, y=1.02)
-    fig1.tight_layout()
-    p1 = out_dir / "fig1_time_vs_problem_size.png"
-    fig1.savefig(p1, dpi=args.dpi, bbox_inches="tight")
-    plt.close(fig1)
-    print("Wrote", p1)
-
-    # ---- Fig 2: one wide stacked-bar figure per n (single row of p columns) ----
-    for n in ns:
-        fig_w = max(14, 2.8 * len(p_vals_all))
-        fig2, axs2 = plt.subplots(
+    # ---- Fig 1/2: stacked (legacy) and/or unstacked (per-p) ----
+    if args.fig12_layout in ("stacked", "both"):
+        n_tp = len(p_vals_plot)
+        fig1s, axes1 = plt.subplots(
             1,
-            len(p_vals_all),
-            figsize=(fig_w, 4.2),
+            n_tp,
+            figsize=(6.5 * n_tp, 5.5),
             squeeze=False,
-            sharey=True,
+            sharey=False,
         )
+        for idx, pval in enumerate(p_vals_plot):
+            ax = axes1[0][idx]
+            plot_time_vs_n_panel(ax, grid, impls_present, ns, pval, annotate=args.annotate)
+            ax.legend(loc="best", fontsize=10, framealpha=0.9)
+        fig1s.suptitle("Total time vs problem size", fontsize=13, y=1.02)
+        fig1s.tight_layout()
+        p1s = out_stacked / "fig1_time_vs_problem_size.png"
+        fig1s.savefig(p1s, dpi=args.dpi, bbox_inches="tight")
+        plt.close(fig1s)
+        print("Wrote", p1s)
 
-        def rowget(key):
-            r = grid.get(key)
-            return r if r is not None else {}
+        for n in ns:
+            fig_w = max(14, 2.8 * len(p_vals_plot))
+            fig2s, axs2 = plt.subplots(
+                1,
+                len(p_vals_plot),
+                figsize=(fig_w, 4.2),
+                squeeze=False,
+                sharey=True,
+            )
 
-        impls2 = [i for i in IMPL_ORDER if i in impls_present]
-        for j_p, pval in enumerate(p_vals_all):
-            axb = axs2[0][j_p]
-            x0 = np.arange(len(impls2), dtype=float)
-            cvals = [rowget((i, n, pval)).get("T_computation", 0) for i in impls2]
-            ovals = [rowget((i, n, pval)).get("T_other", 0) for i in impls2]
-            if not any(cvals) and not any(ovals):
-                axb.set_visible(False)
-                continue
-            axb.bar(x0, cvals, 0.72, label="T_computation", color="#4c78a8")
-            axb.bar(x0, ovals, 0.72, bottom=cvals, label="T_other", color="#f58518")
-            axb.set_xticks(x0)
-            axb.set_xticklabels(impls2, rotation=15, ha="right", fontsize=10)
-            axb.set_title(f"p = {pval}", fontsize=11)
-            axb.set_xlabel("Implementation", fontsize=10)
-            if j_p == 0:
+            def rowget(key):
+                r = grid.get(key)
+                return r if r is not None else {}
+
+            impls2 = [i for i in IMPL_ORDER if i in impls_present]
+            for j_p, pval in enumerate(p_vals_plot):
+                axb = axs2[0][j_p]
+                x0 = np.arange(len(impls2), dtype=float)
+                cvals = [rowget((i, n, pval)).get("T_computation", 0) for i in impls2]
+                ovals = [rowget((i, n, pval)).get("T_other", 0) for i in impls2]
+                if not any(cvals) and not any(ovals):
+                    axb.set_visible(False)
+                    continue
+                axb.bar(x0, cvals, 0.72, label="T_computation", color="#4c78a8")
+                axb.bar(x0, ovals, 0.72, bottom=cvals, label="T_other", color="#f58518")
+                axb.set_xticks(x0)
+                axb.set_xticklabels(impls2, rotation=15, ha="right", fontsize=10)
+                axb.set_title(f"p = {pval}", fontsize=11)
+                axb.set_xlabel("Implementation", fontsize=10)
+                if j_p == 0:
+                    axb.set_ylabel("Time (s)", fontsize=11)
+                    axb.legend(fontsize=9, loc="upper right")
+            fig2s.suptitle(
+                f"Computation vs overhead (stacked)   —   n = {n}",
+                fontsize=13,
+                y=1.05,
+            )
+            fig2s.tight_layout()
+            p2s = out_stacked / f"fig2_stacked_bars_n{n}.png"
+            fig2s.savefig(p2s, dpi=args.dpi, bbox_inches="tight")
+            plt.close(fig2s)
+            print("Wrote", p2s)
+
+    if args.fig12_layout in ("unstacked", "both"):
+        for pval in p_vals_plot:
+            fig1u, ax = plt.subplots(1, 1, figsize=(7.2, 5.6))
+            plot_time_vs_n_panel(ax, grid, impls_present, ns, pval, annotate=args.annotate)
+            ax.legend(loc="best", fontsize=10, framealpha=0.9)
+            fig1u.suptitle(f"Total time vs problem size (p = {pval})", fontsize=13, y=1.02)
+            fig1u.tight_layout()
+            p1u = out_unstacked / f"fig1_time_vs_problem_size_p{pval}.png"
+            fig1u.savefig(p1u, dpi=args.dpi, bbox_inches="tight")
+            plt.close(fig1u)
+            print("Wrote", p1u)
+
+        for n in ns:
+            def rowget_u(key):
+                r = grid.get(key)
+                return r if r is not None else {}
+
+            impls2 = [i for i in IMPL_ORDER if i in impls_present]
+            for pval in p_vals_plot:
+                fig2u, axb = plt.subplots(1, 1, figsize=(8.2, 4.8))
+                x0 = np.arange(len(impls2), dtype=float)
+                cvals = [rowget_u((i, n, pval)).get("T_computation", 0) for i in impls2]
+                ovals = [rowget_u((i, n, pval)).get("T_other", 0) for i in impls2]
+                if not any(cvals) and not any(ovals):
+                    plt.close(fig2u)
+                    continue
+                axb.bar(x0, cvals, 0.72, label="T_computation", color="#4c78a8")
+                axb.bar(x0, ovals, 0.72, bottom=cvals, label="T_other", color="#f58518")
+                axb.set_xticks(x0)
+                axb.set_xticklabels(impls2, rotation=15, ha="right", fontsize=10)
+                axb.set_title(f"n = {n}, p = {pval}", fontsize=11)
+                axb.set_xlabel("Implementation", fontsize=10)
                 axb.set_ylabel("Time (s)", fontsize=11)
-            if j_p == 0:
                 axb.legend(fontsize=9, loc="upper right")
-        fig2.suptitle(
-            f"Computation vs overhead (stacked)   —   n = {n}",
-            fontsize=13,
-            y=1.05,
-        )
-        fig2.tight_layout()
-        p2 = out_dir / f"fig2_stacked_bars_n{n}.png"
-        fig2.savefig(p2, dpi=args.dpi, bbox_inches="tight")
-        plt.close(fig2)
-        print("Wrote", p2)
+                fig2u.suptitle("Computation vs overhead (stacked)", fontsize=13, y=1.02)
+                fig2u.tight_layout()
+                p2u = out_unstacked / f"fig2_stacked_bars_n{n}_p{pval}.png"
+                fig2u.savefig(p2u, dpi=args.dpi, bbox_inches="tight")
+                plt.close(fig2u)
+                print("Wrote", p2u)
 
     # ---- Fig 3: Speedup — one PNG per n (zoomed y); no reference line that flattens story ----
     for n in ns:
